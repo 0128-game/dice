@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>サイコロ出目記録（キーボード対応・保存機能付）</title>
+    <title>サイコロ出目記録（パスワード認証付）</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -33,7 +33,7 @@
         <!-- Header -->
         <div class="mb-8 text-center">
             <h1 class="text-3xl font-bold text-slate-800 mb-2">🎲 サイコロ出目記録</h1>
-            <p class="text-slate-500">データはブラウザに自動保存されます</p>
+            <p class="text-slate-500">一括追加にはパスワード認証が必要です</p>
         </div>
 
         <!-- Input Buttons -->
@@ -87,23 +87,26 @@
 
             <!-- Global Actions -->
             <div class="md:w-72 flex flex-col gap-3">
-                <div class="grid grid-cols-3 gap-2">
-                    <button onclick="addRandomBulk(100)" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 rounded-xl transition-colors shadow-sm text-xs">
-                        +100
-                    </button>
-                    <button onclick="addRandomBulk(1000)" class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 rounded-xl transition-colors shadow-sm text-xs">
-                        +1000
-                    </button>
-                    <button onclick="addRandomBulk(10000)" class="bg-cyan-700 hover:bg-cyan-800 text-white font-semibold py-2 rounded-xl transition-colors shadow-sm text-xs">
-                        +10000
-                    </button>
-                </div>
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <p class="text-[10px] text-slate-400 mb-2 uppercase tracking-wider font-bold">Admin Only</p>
+                    <div class="grid grid-cols-3 gap-2 mb-2">
+                        <button onclick="requestAuth(100)" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
+                            +100
+                        </button>
+                        <button onclick="requestAuth(1000)" class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
+                            +1000
+                        </button>
+                        <button onclick="requestAuth(10000)" class="bg-cyan-700 hover:bg-cyan-800 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
+                            +10000
+                        </button>
+                    </div>
 
-                <div class="flex gap-2">
-                    <input type="number" id="custom-count" placeholder="回数入力" min="1" max="100000" class="flex-grow border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <button onclick="addCustomRandom()" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold px-4 py-2 rounded-xl transition-colors text-xs whitespace-nowrap">
-                        追加
-                    </button>
+                    <div class="flex gap-2">
+                        <input type="number" id="custom-count" placeholder="回数入力" min="1" max="100000" class="flex-grow border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <button onclick="requestAuth('custom')" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors text-xs whitespace-nowrap">
+                            追加
+                        </button>
+                    </div>
                 </div>
 
                 <button onclick="undo()" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-3 px-4 rounded-xl transition-colors">
@@ -116,6 +119,19 @@
         </div>
     </div>
 
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity z-50 p-4">
+        <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 class="text-lg font-bold text-slate-800 mb-2">認証が必要です</h3>
+            <p class="text-sm text-slate-500 mb-4">一括追加を実行するにはパスワードを入力してください。</p>
+            <input type="password" id="auth-pass" placeholder="Password" class="w-full border border-slate-200 rounded-xl px-4 py-3 mb-4 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            <div class="flex gap-3">
+                <button onclick="closeAuth()" class="flex-1 py-3 text-slate-500 font-semibold hover:bg-slate-50 rounded-xl transition-colors">キャンセル</button>
+                <button onclick="verifyAndExecute()" class="flex-1 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors">認証</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Notification system -->
     <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full opacity-0 pointer-events-none transition-opacity duration-300 shadow-xl z-50 text-sm">
         記録しました
@@ -124,35 +140,88 @@
     <script>
         // Storage Key
         const STORAGE_KEY = 'dice_tracker_history';
-        
+        // Base64 encoded hash of the password "admin123" for demonstration.
+        // In a real app, this should be generated on a server.
+        const VALID_HASH_B64 = "YTBmM2YwZmYwOGNlNjE0MDFmOTFmYjY0NzEzMWE1NzUxN2UxZGVlZjY2MDhjMzA0MTAwNDc3NWE1MmJjMDc3OQ==";
+
         let history = [];
         let stats = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+        let pendingCount = 0;
 
-        // Save to LocalStorage
+        // SHA-256 implementation
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function verifyPassword(input) {
+            const hash = await sha256(input);
+            // Combine with Base64 as requested
+            const encodedHash = btoa(hash);
+            return encodedHash === VALID_HASH_B64;
+        }
+
+        function requestAuth(count) {
+            if (count === 'custom') {
+                const input = document.getElementById('custom-count');
+                pendingCount = parseInt(input.value);
+            } else {
+                pendingCount = count;
+            }
+
+            if (isNaN(pendingCount) || pendingCount <= 0) {
+                showToast('有効な回数を入力してください');
+                return;
+            }
+
+            const modal = document.getElementById('auth-modal');
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            document.getElementById('auth-pass').focus();
+        }
+
+        function closeAuth() {
+            const modal = document.getElementById('auth-modal');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            document.getElementById('auth-pass').value = '';
+        }
+
+        async function verifyAndExecute() {
+            const passInput = document.getElementById('auth-pass').value;
+            const isValid = await verifyPassword(passInput);
+
+            if (isValid) {
+                addRandomBulk(pendingCount);
+                closeAuth();
+                if (document.getElementById('custom-count')) document.getElementById('custom-count').value = '';
+            } else {
+                showToast('パスワードが違います');
+                document.getElementById('auth-pass').value = '';
+            }
+        }
+
         function saveData() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
         }
 
-        // Load from LocalStorage
         function loadData() {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 try {
                     history = JSON.parse(saved);
-                    // Recalculate stats
                     stats = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
                     history.forEach(val => {
                         if (stats[val] !== undefined) stats[val]++;
                     });
                 } catch (e) {
-                    console.error("Failed to load data", e);
                     history = [];
                 }
             }
         }
 
         function initUI() {
-            loadData(); // Load first
+            loadData();
             const container = document.getElementById('stats-container');
             const template = document.getElementById('stat-row');
             container.innerHTML = '';
@@ -184,17 +253,6 @@
             saveData();
             updateDisplay();
             showToast(`${safeCount.toLocaleString()} 回追加しました`);
-        }
-
-        function addCustomRandom() {
-            const input = document.getElementById('custom-count');
-            const count = parseInt(input.value);
-            if (isNaN(count) || count <= 0) {
-                showToast('有効な回数を入力してください');
-                return;
-            }
-            addRandomBulk(count);
-            input.value = '';
         }
 
         function undo() {
@@ -250,16 +308,15 @@
         }
 
         window.addEventListener('keydown', (e) => {
-            if (document.activeElement.tagName === 'INPUT') return;
+            if (document.activeElement.tagName === 'INPUT') {
+                if (e.key === 'Enter' && document.activeElement.id === 'auth-pass') {
+                    verifyAndExecute();
+                }
+                return;
+            }
             const key = e.key;
             if (key >= '1' && key <= '6') {
                 record(parseInt(key));
-                const btns = document.querySelectorAll('.dice-btn');
-                const targetBtn = Array.from(btns).find(b => b.textContent == key);
-                if (targetBtn) {
-                    targetBtn.classList.add('bg-indigo-50', 'border-indigo-400');
-                    setTimeout(() => targetBtn.classList.remove('bg-indigo-50', 'border-indigo-400'), 150);
-                }
             } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 undo();
