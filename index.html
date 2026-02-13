@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>サイコロ出目記録（パスワード認証付）</title>
+    <title>サイコロ出目記録（認証保持なし）</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -33,7 +33,7 @@
         <!-- Header -->
         <div class="mb-8 text-center">
             <h1 class="text-3xl font-bold text-slate-800 mb-2">🎲 サイコロ出目記録</h1>
-            <p class="text-slate-500">一括追加にはパスワード認証が必要です</p>
+            <p class="text-slate-500">認証はセッション中のみ有効です（更新でリセット）</p>
         </div>
 
         <!-- Input Buttons -->
@@ -88,22 +88,25 @@
             <!-- Global Actions -->
             <div class="md:w-72 flex flex-col gap-3">
                 <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <p class="text-[10px] text-slate-400 mb-2 uppercase tracking-wider font-bold">Admin Only</p>
+                    <div class="flex justify-between items-center mb-2">
+                        <p class="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Admin Only</p>
+                        <span id="auth-status" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-500 font-bold">未認証</span>
+                    </div>
                     <div class="grid grid-cols-3 gap-2 mb-2">
-                        <button onclick="requestAuth(100)" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
+                        <button onclick="handleBulkAction(100)" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
                             +100
                         </button>
-                        <button onclick="requestAuth(1000)" class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
+                        <button onclick="handleBulkAction(1000)" class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
                             +1000
                         </button>
-                        <button onclick="requestAuth(10000)" class="bg-cyan-700 hover:bg-cyan-800 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
+                        <button onclick="handleBulkAction(10000)" class="bg-cyan-700 hover:bg-cyan-800 text-white font-semibold py-2 rounded-lg transition-colors shadow-sm text-xs">
                             +10000
                         </button>
                     </div>
 
                     <div class="flex gap-2">
                         <input type="number" id="custom-count" placeholder="回数入力" min="1" max="100000" class="flex-grow border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                        <button onclick="requestAuth('custom')" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors text-xs whitespace-nowrap">
+                        <button onclick="handleBulkAction('custom')" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors text-xs whitespace-nowrap">
                             追加
                         </button>
                     </div>
@@ -138,17 +141,14 @@
     </div>
 
     <script>
-        // Storage Key
         const STORAGE_KEY = 'dice_tracker_history';
-        // Base64 encoded hash of the password "admin123" for demonstration.
-        // In a real app, this should be generated on a server.
         const VALID_HASH_B64 = "YTBmM2YwZmYwOGNlNjE0MDFmOTFmYjY0NzEzMWE1NzUxN2UxZGVlZjY2MDhjMzA0MTAwNDc3NWE1MmJjMDc3OQ==";
 
         let history = [];
         let stats = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
         let pendingCount = 0;
+        let isAuthed = false; // 認証状態はメモリ内（変数）でのみ管理
 
-        // SHA-256 implementation
         async function sha256(message) {
             const msgBuffer = new TextEncoder().encode(message);
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
@@ -158,12 +158,11 @@
 
         async function verifyPassword(input) {
             const hash = await sha256(input);
-            // Combine with Base64 as requested
             const encodedHash = btoa(hash);
             return encodedHash === VALID_HASH_B64;
         }
 
-        function requestAuth(count) {
+        function handleBulkAction(count) {
             if (count === 'custom') {
                 const input = document.getElementById('custom-count');
                 pendingCount = parseInt(input.value);
@@ -176,6 +175,15 @@
                 return;
             }
 
+            if (isAuthed) {
+                addRandomBulk(pendingCount);
+                if (count === 'custom') document.getElementById('custom-count').value = '';
+            } else {
+                openAuth();
+            }
+        }
+
+        function openAuth() {
             const modal = document.getElementById('auth-modal');
             modal.classList.remove('opacity-0', 'pointer-events-none');
             document.getElementById('auth-pass').focus();
@@ -192,12 +200,28 @@
             const isValid = await verifyPassword(passInput);
 
             if (isValid) {
+                isAuthed = true; // メモリ内でのみ認証
+                updateAuthUI();
                 addRandomBulk(pendingCount);
                 closeAuth();
                 if (document.getElementById('custom-count')) document.getElementById('custom-count').value = '';
+                showToast('認証に成功しました');
             } else {
                 showToast('パスワードが違います');
                 document.getElementById('auth-pass').value = '';
+            }
+        }
+
+        function updateAuthUI() {
+            const statusLabel = document.getElementById('auth-status');
+            if (isAuthed) {
+                statusLabel.textContent = '認証済み';
+                statusLabel.classList.remove('bg-slate-200', 'text-slate-500');
+                statusLabel.classList.add('bg-emerald-100', 'text-emerald-600');
+            } else {
+                statusLabel.textContent = '未認証';
+                statusLabel.classList.remove('bg-emerald-100', 'text-emerald-600');
+                statusLabel.classList.add('bg-slate-200', 'text-slate-500');
             }
         }
 
@@ -218,10 +242,12 @@
                     history = [];
                 }
             }
+            // 認証状態(AUTH_KEY)の読み込み処理は削除（localStorageに保存しないため）
         }
 
         function initUI() {
             loadData();
+            updateAuthUI();
             const container = document.getElementById('stats-container');
             const template = document.getElementById('stat-row');
             container.innerHTML = '';
